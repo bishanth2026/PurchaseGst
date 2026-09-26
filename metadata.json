@@ -1,0 +1,6 @@
+{
+  "name": "Biznexco GST & Purchase Invoice Automation",
+  "description": "Enterprise purchase invoice OCR extraction, GST validation, GSTR-2B import, and intelligent reconciliation engine with audit trail.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
