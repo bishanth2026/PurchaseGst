@@ -57,6 +57,7 @@ function floatToPcm16(
   return new Uint8Array(pcm.buffer);
 }
 
+
 export const GeminiLiveVoice: React.FC<GeminiLiveVoiceProps> = ({ language, context }) => {
   const [active, setActive] = useState(false);
   const [connecting, setConnecting] = useState(false);
@@ -71,10 +72,28 @@ export const GeminiLiveVoice: React.FC<GeminiLiveVoiceProps> = ({ language, cont
   const audioContextRef = useRef<AudioContext | null>(null);
   const processorRef = useRef<ScriptProcessorNode | null>(null);
   const sourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
+  const silentGainRef = useRef<GainNode | null>(null);
   const mountedRef = useRef(true);
-  const stopTimerRef = useRef<number | null>(null);
+  const manualStopRef = useRef(false);
+  const reconnectingRef = useRef(false);
+  const reconnectTimerRef = useRef<number | null>(null);
+  const reconnectAttemptRef = useRef(0);
+  const sessionHandleRef = useRef<string | null>(null);
+  const systemInstructionRef = useRef('');
+  const selectedLanguageRef = useRef<'en-IN' | 'ml-IN'>(selectedLanguage);
   const nextPlayTimeRef = useRef(0);
 
+  useEffect(() => {
+    selectedLanguageRef.current = selectedLanguage;
+  }, [selectedLanguage]);
+
+  const appendInputTranscript = (text: string, interim = false) => {
+    if (!text) return;
+    setInputTranscript((prev) => {
+      const base = prev.endsWith('…') ? prev.slice(0, -1) : prev;
+      return base + text + (interim ? '…' : '');
+    });
+  };
 
   const playPcm24k = (base64: string) => {
     const audioContext = audioContextRef.current;
@@ -85,57 +104,52 @@ export const GeminiLiveVoice: React.FC<GeminiLiveVoiceProps> = ({ language, cont
       const bytes = new Uint8Array(binary.length);
       for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
 
-      const pcm = new Int16Array(
-        bytes.buffer,
-        bytes.byteOffset,
-        Math.floor(bytes.byteLength / 2),
-      );
-
+      const pcm = new Int16Array(bytes.buffer, bytes.byteOffset, Math.floor(bytes.byteLength / 2));
       if (!pcm.length) return;
 
       const audioBuffer = audioContext.createBuffer(1, pcm.length, 24000);
       const channel = audioBuffer.getChannelData(0);
-
-      for (let i = 0; i < pcm.length; i++) {
-        channel[i] = pcm[i] / 32768;
-      }
+      for (let i = 0; i < pcm.length; i++) channel[i] = pcm[i] / 32768;
 
       const source = audioContext.createBufferSource();
       source.buffer = audioBuffer;
       source.connect(audioContext.destination);
 
-      const startAt = Math.max(
-        audioContext.currentTime + 0.02,
-        nextPlayTimeRef.current,
-      );
-
+      const startAt = Math.max(audioContext.currentTime + 0.02, nextPlayTimeRef.current);
       source.start(startAt);
       nextPlayTimeRef.current = startAt + audioBuffer.duration;
     } catch (e) {
       if (mountedRef.current) {
-        setError(e instanceof Error ? `AI audio playback failed: ${e.message}` : 'AI audio playback failed.');
+        setError(e instanceof Error ? 'AI audio playback failed: ' + e.message : 'AI audio playback failed.');
       }
+    }
+  };
+
+  const clearReconnectTimer = () => {
+    if (reconnectTimerRef.current !== null) {
+      window.clearTimeout(reconnectTimerRef.current);
+      reconnectTimerRef.current = null;
     }
   };
 
   const disposeLocalAudio = () => {
     try { processorRef.current?.disconnect(); } catch {}
     try { sourceRef.current?.disconnect(); } catch {}
+    try { silentGainRef.current?.disconnect(); } catch {}
     try { streamRef.current?.getTracks().forEach((track) => track.stop()); } catch {}
     try { audioContextRef.current?.close(); } catch {}
 
     processorRef.current = null;
     sourceRef.current = null;
+    silentGainRef.current = null;
     streamRef.current = null;
     audioContextRef.current = null;
+    nextPlayTimeRef.current = 0;
   };
 
   const closeSession = () => {
-    if (stopTimerRef.current !== null) {
-      window.clearTimeout(stopTimerRef.current);
-      stopTimerRef.current = null;
-    }
-
+    manualStopRef.current = true;
+    clearReconnectTimer();
     try { sessionRef.current?.close?.(); } catch {}
     sessionRef.current = null;
     disposeLocalAudio();
@@ -149,16 +163,205 @@ export const GeminiLiveVoice: React.FC<GeminiLiveVoiceProps> = ({ language, cont
 
   useEffect(() => {
     mountedRef.current = true;
-
     return () => {
       mountedRef.current = false;
       closeSession();
     };
   }, []);
 
+  const getToken = async () => {
+    const response = await fetch(TOKEN_ENDPOINT, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ language: selectedLanguageRef.current }),
+    });
+    const payload = await response.json().catch(() => ({}));
+
+    if (!response.ok || !payload?.token) {
+      throw new Error(payload?.error || 'Could not obtain a secure Gemini Live session token.');
+    }
+    return payload;
+  };
+
+  const connectLiveSession = async (resumeHandle: string | null = null) => {
+    const tokenPayload = await getToken();
+    const ai = new GoogleGenAI({ apiKey: tokenPayload.token });
+    const model = tokenPayload.model || 'gemini-3.8-live';
+    let session: any = null;
+
+    session = await ai.live.connect({
+      model,
+      config: {
+        responseModalities: [Modality.AUDIO],
+        speechConfig: {
+          voiceConfig: {
+            prebuiltVoiceConfig: {
+              voiceName: 'Kore',
+            },
+          },
+        },
+        inputAudioTranscription: {
+          languageCodes: [selectedLanguageRef.current],
+          mode: 'SMART',
+        },
+        outputAudioTranscription: {},
+        sessionResumption: resumeHandle ? { handle: resumeHandle } : {},
+        systemInstruction: systemInstructionRef.current,
+      },
+      callbacks: {
+        onopen: () => {
+          if (mountedRef.current) setStatus(resumeHandle ? 'Voice connection restored…' : 'Listening…');
+        },
+
+        onmessage: (message: any) => {
+          try {
+            if (message?.sessionResumptionUpdate?.resumable && message.sessionResumptionUpdate.newHandle) {
+              sessionHandleRef.current = message.sessionResumptionUpdate.newHandle;
+            }
+
+            if (message?.goAway) {
+              const rawTime = message.goAway.timeLeft;
+              const seconds = typeof rawTime === 'number'
+                ? rawTime
+                : Number(String(rawTime || '').replace('s', '')) || 1;
+
+              clearReconnectTimer();
+              reconnectTimerRef.current = window.setTimeout(
+                () => {
+                  if (!manualStopRef.current) void reconnectLiveSession(sessionHandleRef.current);
+                },
+                Math.max(100, Math.floor(seconds * 1000) - 300),
+              );
+
+              if (mountedRef.current) setStatus('Refreshing voice connection…');
+              return;
+            }
+
+            const content = message?.serverContent;
+            if (!content) return;
+
+            if (content.interimInputTranscription?.text) {
+              appendInputTranscript(content.interimInputTranscription.text, true);
+            }
+
+            if (content.inputTranscription?.text) {
+              appendInputTranscript(content.inputTranscription.text, false);
+            }
+
+            if (content.outputTranscription?.text) {
+              setOutputTranscript((prev) => prev + content.outputTranscription.text);
+            }
+
+            if (content.interrupted) {
+              nextPlayTimeRef.current = audioContextRef.current?.currentTime || 0;
+            }
+
+            const parts = content.modelTurn?.parts || [];
+            for (const part of parts) {
+              if (part?.inlineData?.data) playPcm24k(part.inlineData.data);
+            }
+
+            if (parts.length && mountedRef.current) setStatus('AI responding…');
+            if (content.turnComplete && mountedRef.current) setStatus('Listening…');
+          } catch (e) {
+            if (mountedRef.current) {
+              setError(e instanceof Error ? e.message : 'Could not process Gemini Live response.');
+            }
+          }
+        },
+
+        onerror: (event: any) => {
+          if (!mountedRef.current || manualStopRef.current) return;
+          const message = event?.message || event?.error?.message || 'Gemini Live connection error.';
+          setError('Voice connection interrupted: ' + message);
+          setStatus('Reconnecting…');
+        },
+
+        onclose: (event: any) => {
+          if (!mountedRef.current || manualStopRef.current || sessionRef.current !== session) return;
+
+          sessionRef.current = null;
+
+          const code = Number(event?.code || 0);
+          const reason = String(event?.reason || '');
+          const isServerFailure = code === 1011 || /internal error|server/i.test(reason);
+
+          setError(
+            isServerFailure
+              ? 'Gemini Live connection was interrupted. Reconnecting automatically…'
+              : 'Voice connection ended' + (code ? ' (code ' + code + ')' : '') + (reason ? ': ' + reason : '.'),
+          );
+          setStatus('Reconnecting…');
+
+          clearReconnectTimer();
+
+          const attempt = reconnectAttemptRef.current;
+          const delay = Math.min(2500, 400 + attempt * 400);
+          reconnectAttemptRef.current = attempt + 1;
+
+          reconnectTimerRef.current = window.setTimeout(async () => {
+            if (manualStopRef.current || !mountedRef.current) return;
+
+            try {
+              await reconnectLiveSession(sessionHandleRef.current);
+            } catch {
+              if (reconnectAttemptRef.current < 6 && mountedRef.current && !manualStopRef.current) {
+                setStatus('Retrying voice connection…');
+                reconnectTimerRef.current = window.setTimeout(() => {
+                  if (!manualStopRef.current) void reconnectLiveSession(sessionHandleRef.current);
+                }, 1500);
+              } else if (mountedRef.current) {
+                setStatus('Voice connection failed');
+                setError('Gemini Live could not reconnect. Please tap Start Live Voice to try again.');
+                setActive(false);
+                setConnecting(false);
+              }
+            }
+          }, delay);
+        },
+      },
+    });
+
+    sessionRef.current = session;
+    reconnectingRef.current = false;
+    reconnectAttemptRef.current = 0;
+    setActive(true);
+    setConnecting(false);
+    setError('');
+    setStatus('Listening…');
+
+    return session;
+  };
+
+  const reconnectLiveSession = async (resumeHandle: string | null) => {
+    if (reconnectingRef.current || manualStopRef.current || !mountedRef.current) return;
+    reconnectingRef.current = true;
+
+    try {
+      if (mountedRef.current) setStatus('Reconnecting securely…');
+
+      try {
+        await connectLiveSession(resumeHandle);
+      } catch (resumeError) {
+        if (resumeHandle) {
+          sessionHandleRef.current = null;
+          await connectLiveSession(null);
+        } else {
+          throw resumeError;
+        }
+      }
+    } finally {
+      reconnectingRef.current = false;
+    }
+  };
+
   const startVoice = async () => {
     if (active || connecting) return;
 
+    manualStopRef.current = false;
+    clearReconnectTimer();
+    sessionHandleRef.current = null;
+    reconnectAttemptRef.current = 0;
     setError('');
     setInputTranscript('');
     setOutputTranscript('');
@@ -180,36 +383,15 @@ export const GeminiLiveVoice: React.FC<GeminiLiveVoiceProps> = ({ language, cont
       });
       streamRef.current = stream;
 
-      setStatus('Getting secure Gemini session…');
-
-      const tokenResponse = await fetch(TOKEN_ENDPOINT, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ language: selectedLanguage }),
-      });
-
-      const tokenPayload = await tokenResponse.json().catch(() => ({}));
-
-      if (!tokenResponse.ok || !tokenPayload?.token) {
-        throw new Error(tokenPayload?.error || 'Could not obtain a secure Gemini Live session token.');
-      }
-
-      // Create the browser audio context while it is still inside the
-      // user-initiated microphone gesture. This is required by iOS/Safari
-      // for reliable output-audio playback.
       const audioContext = new AudioContext();
       audioContextRef.current = audioContext;
       await audioContext.resume();
 
-      // Use Google's official GenAI SDK for the Live session instead of
-      // manually parsing raw WebSocket frames. The SDK normalizes browser
-      // WebSocket frames and exposes parsed serverContent callbacks.
-      const ai = new GoogleGenAI({ apiKey: tokenPayload.token });
-
-      const systemInstruction = [
+      systemInstructionRef.current = [
         'You are the Biznexco real-time voice assistant.',
         'Answer questions about GST, accounting, finance, business, and the Biznexco Purchase Invoice Automation application.',
-        `Speak naturally in the user's selected language: ${selectedLanguage === 'ml-IN' ? 'Malayalam' : 'English (India)'}.`,
+        'Speak naturally in the user selected language: ' +
+          (selectedLanguageRef.current === 'ml-IN' ? 'Malayalam' : 'English (India)') + '.',
         'Use only the supplied current-app context for claims about live invoice counts, amounts, suppliers, reconciliation results, ITC, dates, and statuses.',
         'Never invent app data. If the supplied context does not contain the answer, say that it is not available.',
         'You are read-only in this voice phase. Do not claim that you approved, deleted, changed, uploaded, or reconciled anything.',
@@ -219,101 +401,8 @@ export const GeminiLiveVoice: React.FC<GeminiLiveVoiceProps> = ({ language, cont
         JSON.stringify(context),
       ].join('\n');
 
-      setStatus('Connecting to Gemini Live…');
-
-      const session = await ai.live.connect({
-        model: tokenPayload.model || 'gemini-3.8-live',
-        config: {
-          responseModalities: [Modality.AUDIO],
-          speechConfig: {
-            voiceConfig: {
-              prebuiltVoiceConfig: {
-                voiceName: 'Kore',
-              },
-            },
-          },
-          inputAudioTranscription: {
-            languageCodes: [selectedLanguage],
-            mode: 'SMART',
-          },
-          outputAudioTranscription: {},
-          systemInstruction,
-        },
-        callbacks: {
-          onopen: () => {
-            if (mountedRef.current) setStatus('Listening…');
-          },
-          onmessage: (message: any) => {
-            try {
-              const content = message?.serverContent;
-              if (!content) return;
-
-              // Google documents input transcription as an independent
-              // server message with no guaranteed ordering relative to
-              // turnComplete. Always consume it before any lifecycle action.
-              if (content.inputTranscription?.text) {
-                setInputTranscript((prev) => prev + content.inputTranscription.text);
-              }
-
-              if (content.interimInputTranscription?.text) {
-                // Show interim speech immediately so the user can verify that
-                // the microphone/audio pipeline is actually working.
-                setInputTranscript((prev) => {
-                  const marker = '…';
-                  const base = prev.endsWith(marker) ? prev.slice(0, -marker.length) : prev;
-                  return base + content.interimInputTranscription.text + marker;
-                });
-              }
-
-              if (content.outputTranscription?.text) {
-                setOutputTranscript((prev) => prev + content.outputTranscription.text);
-              }
-
-              // Gemini 3.8 Live returns native speech as 24 kHz PCM in
-              // modelTurn.parts[].inlineData. Transcription alone does not
-              // play the answer; the browser must explicitly schedule the
-              // returned PCM audio.
-              const parts = content.modelTurn?.parts || [];
-              for (const part of parts) {
-                if (part?.inlineData?.data) {
-                  playPcm24k(part.inlineData.data);
-                }
-              }
-
-              if (parts.length > 0 && mountedRef.current) {
-                setStatus('AI responding…');
-              }
-
-              if (content.turnComplete && mountedRef.current) {
-                setStatus('Listening…');
-              }
-            } catch (e) {
-              if (mountedRef.current) {
-                setError(e instanceof Error ? e.message : 'Could not process Gemini Live response.');
-              }
-            }
-          },
-          onerror: (event: any) => {
-            if (mountedRef.current) {
-              const message = event?.message || event?.error?.message || 'Gemini Live connection failed.';
-              setError(message);
-              setStatus('Connection error');
-              setActive(false);
-              setConnecting(false);
-            }
-          },
-          onclose: (event: any) => {
-            if (mountedRef.current && sessionRef.current === session) {
-              const reason = event?.reason || '';
-              setStatus(reason ? `Voice ended: ${reason}` : 'Voice session ended');
-              setActive(false);
-              setConnecting(false);
-            }
-          },
-        },
-      });
-
-      sessionRef.current = session;
+      setStatus('Getting secure Gemini session…');
+      await connectLiveSession(null);
 
       const source = audioContext.createMediaStreamSource(stream);
       const processor = audioContext.createScriptProcessor(2048, 1, 1);
@@ -322,10 +411,11 @@ export const GeminiLiveVoice: React.FC<GeminiLiveVoiceProps> = ({ language, cont
 
       sourceRef.current = source;
       processorRef.current = processor;
+      silentGainRef.current = silentGain;
 
       processor.onaudioprocess = (event) => {
         const liveSession = sessionRef.current;
-        if (!liveSession) return;
+        if (!liveSession || manualStopRef.current) return;
 
         try {
           const input = event.inputBuffer.getChannelData(0);
@@ -338,7 +428,7 @@ export const GeminiLiveVoice: React.FC<GeminiLiveVoiceProps> = ({ language, cont
             },
           });
         } catch (e) {
-          if (mountedRef.current) {
+          if (mountedRef.current && !manualStopRef.current) {
             setError(e instanceof Error ? e.message : 'Microphone audio could not be sent.');
           }
         }
@@ -357,7 +447,6 @@ export const GeminiLiveVoice: React.FC<GeminiLiveVoiceProps> = ({ language, cont
       if (mountedRef.current) {
         setConnecting(false);
         setActive(false);
-
         const message = String(e?.message || 'Unable to start voice assistant.');
         setError(
           message.toLowerCase().includes('permission')
@@ -370,6 +459,9 @@ export const GeminiLiveVoice: React.FC<GeminiLiveVoiceProps> = ({ language, cont
   };
 
   const stopVoice = () => {
+    manualStopRef.current = true;
+    clearReconnectTimer();
+
     const session = sessionRef.current;
     if (!session) {
       closeSession();
@@ -379,25 +471,29 @@ export const GeminiLiveVoice: React.FC<GeminiLiveVoiceProps> = ({ language, cont
     setStatus('Finishing transcription…');
 
     try {
-      // Official Live API flow: when microphone input ends, send
-      // audioStreamEnd rather than immediately destroying the session.
       session.sendRealtimeInput({ audioStreamEnd: true });
     } catch {}
 
-    disposeLocalAudio();
+    try { processorRef.current?.disconnect(); } catch {}
+    try { sourceRef.current?.disconnect(); } catch {}
+    try { streamRef.current?.getTracks().forEach((track) => track.stop()); } catch {}
 
-    // Keep the SDK session alive briefly so the independent final
-    // inputTranscription message can reach the callback.
-    if (stopTimerRef.current !== null) {
-      window.clearTimeout(stopTimerRef.current);
-    }
+    processorRef.current = null;
+    sourceRef.current = null;
+    streamRef.current = null;
 
-    stopTimerRef.current = window.setTimeout(() => {
-      closeSession();
-    }, 3500);
+    window.setTimeout(() => {
+      try { session.close?.(); } catch {}
+      if (sessionRef.current === session) sessionRef.current = null;
+      try { audioContextRef.current?.close(); } catch {}
+      audioContextRef.current = null;
 
-    setActive(false);
-    setConnecting(false);
+      if (mountedRef.current) {
+        setActive(false);
+        setConnecting(false);
+        setStatus('Ready');
+      }
+    }, 1500);
   };
 
   return (
@@ -440,7 +536,6 @@ export const GeminiLiveVoice: React.FC<GeminiLiveVoiceProps> = ({ language, cont
               <span className="text-slate-500">You: </span>{inputTranscript}
             </div>
           )}
-
           {outputTranscript && (
             <div className="rounded-lg bg-slate-950/70 border border-slate-800 px-3 py-2 text-slate-300">
               <span className="text-indigo-300">Biznexco: </span>{outputTranscript}
