@@ -56,7 +56,7 @@ export const AiAssistantView: React.FC<AiAssistantViewProps> = ({
         invoiceDate: invoice.invoiceDate,
         totalAmount: invoice.totalAmount,
         taxableValue: invoice.taxableValue,
-        totalTax: invoice.totalTax,
+        totalTax: invoice.cgstAmount + invoice.sgstAmount + invoice.igstAmount + invoice.cessAmount,
         itcEligibility: invoice.itcEligibility,
         status: invoice.status,
         returnPeriod: invoice.returnPeriod,
