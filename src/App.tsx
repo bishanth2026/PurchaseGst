@@ -9,6 +9,7 @@ import { BenchmarkTestView } from './components/BenchmarkTestView';
 import { ManualInvoiceModal } from './components/ManualInvoiceModal';
 import { SupabaseSettingsModal } from './components/SupabaseSettingsModal';
 import { DeleteConfirmationModal } from './components/DeleteConfirmationModal';
+import { AiAgentView } from './components/AiAgentView';
 
 import { Organization, PurchaseInvoice, UserRole } from './types';
 import { InvoiceService } from './services/invoiceService';
@@ -254,6 +255,8 @@ export default function App() {
             onRunReconciliation={handleRunReconciliation}
           />
         )}
+
+        {activeTab === 'agent' && <AiAgentView />}
 
         {activeTab === 'register' && (
           <PurchaseRegisterView
