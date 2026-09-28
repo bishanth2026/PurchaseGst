@@ -13,6 +13,7 @@ import { DeleteConfirmationModal } from './components/DeleteConfirmationModal';
 import { Organization, PurchaseInvoice, UserRole } from './types';
 import { InvoiceService } from './services/invoiceService';
 import { computeDashboardMetrics } from './utils/reconciliationEngine';
+import { getGstr2bReturnPeriod, getInvoiceReturnPeriod, isInReturnPeriod } from './utils/returnPeriod';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<string>('dashboard');
@@ -51,6 +52,8 @@ export default function App() {
   const handleUpdateOrganization = (newOrg: Organization) => {
     setOrganization(newOrg);
     InvoiceService.saveOrganization(newOrg);
+    const periodResults = InvoiceService.executeReconciliation();
+    setReconciliations([...periodResults]);
     showToast(`Return Period updated to ${newOrg.currentReturnPeriod}`);
   };
 
@@ -198,9 +201,22 @@ export default function App() {
   };
 
   // Derived Dashboard Metrics
+  const periodScopedInvoices = useMemo(
+    () => invoices.filter((invoice) => isInReturnPeriod(getInvoiceReturnPeriod(invoice), organization.currentReturnPeriod)),
+    [invoices, organization.currentReturnPeriod]
+  );
+  const periodScopedGstr2bRecords = useMemo(
+    () => gstr2bRecords.filter((record) => isInReturnPeriod(getGstr2bReturnPeriod(record), organization.currentReturnPeriod)),
+    [gstr2bRecords, organization.currentReturnPeriod]
+  );
+  const periodScopedReconciliations = useMemo(
+    () => reconciliations.filter((item) => isInReturnPeriod(item.returnPeriod, organization.currentReturnPeriod)),
+    [reconciliations, organization.currentReturnPeriod]
+  );
+
   const metrics = useMemo(() => {
-    return computeDashboardMetrics(invoices, gstr2bRecords, reconciliations);
-  }, [invoices, gstr2bRecords, reconciliations]);
+    return computeDashboardMetrics(periodScopedInvoices, periodScopedGstr2bRecords, periodScopedReconciliations);
+  }, [periodScopedInvoices, periodScopedGstr2bRecords, periodScopedReconciliations]);
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans">
@@ -265,8 +281,8 @@ export default function App() {
         {activeTab === 'reconciliation' && (
           <ReconciliationView
             reconciliations={reconciliations}
-            booksInvoices={invoices}
-            gstr2bRecords={gstr2bRecords}
+            booksInvoices={periodScopedInvoices}
+            gstr2bRecords={periodScopedGstr2bRecords}
             organization={organization}
             onRefreshReconciliation={handleRunReconciliation}
           />
