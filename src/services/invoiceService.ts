@@ -18,6 +18,7 @@ import { normalizeInvoiceNumber, validatePurchaseInvoice } from '../utils/gstVal
 import { runReconciliation } from '../utils/reconciliationEngine';
 import { generate100InvoicesDataset } from '../utils/stressTest100';
 import { getSupabaseClient } from './supabaseClient';
+import { getGstr2bReturnPeriod, getInvoiceReturnPeriod, isInReturnPeriod } from '../utils/returnPeriod';
 
 const STORAGE_KEY_INVOICES = 'biznexco_invoices_v1';
 const STORAGE_KEY_GSTR2B = 'biznexco_gstr2b_v1';
@@ -118,6 +119,7 @@ export class InvoiceService {
       invoiceNumber: invoice.invoiceNumber || '',
       normalizedInvoiceNumber: normalizeInvoiceNumber(invoice.invoiceNumber || ''),
       invoiceDate: invoice.invoiceDate || new Date().toISOString().split('T')[0],
+      returnPeriod: invoice.returnPeriod || org.currentReturnPeriod,
       documentType: invoice.documentType || 'INV',
       placeOfSupply: invoice.placeOfSupply || org.stateCode,
       taxableValue: Number(invoice.taxableValue) || 0,
@@ -365,10 +367,14 @@ export class InvoiceService {
       } catch {}
     }
     // Compute fresh reconciliation from existing data
-    const books = this.getInvoices();
-    const gstr2b = this.getGSTR2BRecords();
+    const allBooks = this.getInvoices();
+    const allGstr2b = this.getGSTR2BRecords();
     const org = this.getOrganization();
-    const results = runReconciliation(books, gstr2b, org.currentReturnPeriod);
+    const books = allBooks.filter((invoice) => isInReturnPeriod(getInvoiceReturnPeriod(invoice), org.currentReturnPeriod));
+    const gstr2b = allGstr2b.filter((record) => isInReturnPeriod(getGstr2bReturnPeriod(record), org.currentReturnPeriod));
+    const stored = safeGetItem(STORAGE_KEY_RECON);
+    const existing = stored ? (() => { try { return JSON.parse(stored).filter((r: ReconciliationItem) => isInReturnPeriod(r.returnPeriod, org.currentReturnPeriod)); } catch { return []; } })() : [];
+    const results = runReconciliation(books, gstr2b, org.currentReturnPeriod, existing);
     this.saveReconciliationResults(results);
     return results;
   }
@@ -378,9 +384,9 @@ export class InvoiceService {
   }
 
   public static executeReconciliation(): ReconciliationItem[] {
-    const books = this.getInvoices();
-    const gstr2b = this.getGSTR2BRecords();
     const org = this.getOrganization();
+    const books = this.getInvoices().filter((invoice) => isInReturnPeriod(getInvoiceReturnPeriod(invoice), org.currentReturnPeriod));
+    const gstr2b = this.getGSTR2BRecords().filter((record) => isInReturnPeriod(getGstr2bReturnPeriod(record), org.currentReturnPeriod));
     const existing = this.getReconciliationResults();
 
     const results = runReconciliation(books, gstr2b, org.currentReturnPeriod, existing);
