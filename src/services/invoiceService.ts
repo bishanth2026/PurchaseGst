@@ -620,23 +620,30 @@ export class InvoiceService {
   // LOAD 100-INVOICE STRESS TEST DATASET
   public static load100InvoiceStressDataset(): void {
     const { books, gstr2b } = generate100InvoicesDataset();
+    // Benchmark datasets intentionally span multiple invoice dates (including >30-day
+    // date-variance cases). Keep them in the active benchmark return-period scope so
+    // the period-aware production reconciliation filters do not hide the very records
+    // the benchmark is designed to validate.
+    const benchmarkPeriod = this.getOrganization().currentReturnPeriod;
+    const scopedBooks = books.map((invoice) => ({ ...invoice, returnPeriod: benchmarkPeriod }));
+    const scopedGstr2b = gstr2b.map((record) => ({ ...record, returnPeriod: benchmarkPeriod }));
 
     safeRemoveItem(STORAGE_KEY_INVOICES);
     safeRemoveItem(STORAGE_KEY_GSTR2B);
     safeRemoveItem(STORAGE_KEY_RECON);
     safeRemoveItem(STORAGE_KEY_BATCHES);
 
-    safeSetItem(STORAGE_KEY_INVOICES, JSON.stringify(books));
-    safeSetItem(STORAGE_KEY_GSTR2B, JSON.stringify(gstr2b));
+    safeSetItem(STORAGE_KEY_INVOICES, JSON.stringify(scopedBooks));
+    safeSetItem(STORAGE_KEY_GSTR2B, JSON.stringify(scopedGstr2b));
 
-    const recon = runReconciliation(books, gstr2b, DEFAULT_ORG.currentReturnPeriod);
+    const recon = runReconciliation(scopedBooks, scopedGstr2b, benchmarkPeriod);
     safeSetItem(STORAGE_KEY_RECON, JSON.stringify(recon));
 
     this.addAuditLog(
       'BATCH',
       'stress_test_100',
       'STRESS_LOAD',
-      `Loaded 100-invoice stress test dataset (${books.length} purchase vouchers, ${gstr2b.length} GSTR-2B records).`,
+      `Loaded 100-invoice stress test dataset (${scopedBooks.length} purchase vouchers, ${scopedGstr2b.length} GSTR-2B records) for return period ${benchmarkPeriod}.`,
       'System Auditor'
     );
   }
