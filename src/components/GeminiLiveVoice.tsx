@@ -219,7 +219,7 @@ export const GeminiLiveVoice: React.FC<GeminiLiveVoiceProps> = ({ language, cont
     }
     // Ephemeral Live tokens are v1beta credentials. Pin the SDK connection
     // explicitly so a future SDK default cannot route the WebSocket elsewhere.
-    const ai = new GoogleGenAI({ apiKey: tokenPayload.token, apiVersion: 'v1beta' });
+    const ai = new GoogleGenAI({ apiKey: tokenPayload.token, httpOptions: { apiVersion: 'v1beta' } });
     const model = tokenPayload.model || 'gemini-3.8-live';
     let session: any = null;
 
@@ -236,7 +236,6 @@ export const GeminiLiveVoice: React.FC<GeminiLiveVoiceProps> = ({ language, cont
         },
         inputAudioTranscription: {
           languageCodes: [selectedLanguageRef.current],
-          mode: 'SMART',
         },
         outputAudioTranscription: {},
         sessionResumption: resumeHandle ? { handle: resumeHandle } : {},
