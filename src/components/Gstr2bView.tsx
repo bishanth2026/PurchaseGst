@@ -14,6 +14,7 @@ import { GSTR2BRecord, Organization } from '../types';
 import { parseGSTR2BFile } from '../services/excelService';
 import { InvoiceService } from '../services/invoiceService';
 import { BENCHMARK_GSTR2B_RECORDS } from '../utils/testDatasets';
+import { getGstr2bReturnPeriod, isInReturnPeriod } from '../utils/returnPeriod';
 
 interface Gstr2bViewProps {
   records: GSTR2BRecord[];
@@ -66,6 +67,7 @@ export const Gstr2bView: React.FC<Gstr2bViewProps> = ({
   };
 
   const filtered = records.filter((r) => {
+    if (!isInReturnPeriod(getGstr2bReturnPeriod(r), organization.currentReturnPeriod)) return false;
     if (!searchTerm) return true;
     const q = searchTerm.toLowerCase();
     return (
