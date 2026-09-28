@@ -217,7 +217,9 @@ export const GeminiLiveVoice: React.FC<GeminiLiveVoiceProps> = ({ language, cont
         ? new Date(tokenPayload.expiresAt).getTime()
         : Date.now() + 29 * 60 * 1000;
     }
-    const ai = new GoogleGenAI({ apiKey: tokenPayload.token });
+    // Ephemeral Live tokens are v1beta credentials. Pin the SDK connection
+    // explicitly so a future SDK default cannot route the WebSocket elsewhere.
+    const ai = new GoogleGenAI({ apiKey: tokenPayload.token, apiVersion: 'v1beta' });
     const model = tokenPayload.model || 'gemini-3.8-live';
     let session: any = null;
 
@@ -262,7 +264,6 @@ export const GeminiLiveVoice: React.FC<GeminiLiveVoiceProps> = ({ language, cont
               reconnectTimerRef.current = window.setTimeout(
                 () => {
                   if (!manualStopRef.current) {
-                    reconnectAttemptRef.current += 1;
                     void reconnectLiveSession(sessionHandleRef.current);
                   }
                 },
@@ -357,7 +358,10 @@ export const GeminiLiveVoice: React.FC<GeminiLiveVoiceProps> = ({ language, cont
                 setError('Voice reconnect failed: ' + detail);
                 setStatus('Retrying voice connection…');
                 reconnectTimerRef.current = window.setTimeout(() => {
-                  if (!manualStopRef.current) void reconnectLiveSession(sessionHandleRef.current);
+                  if (!manualStopRef.current) {
+                    reconnectAttemptRef.current += 1;
+                    void reconnectLiveSession(sessionHandleRef.current);
+                  }
                 }, 1500);
               } else if (mountedRef.current) {
                 setStatus('Voice connection failed');
