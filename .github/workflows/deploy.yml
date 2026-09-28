@@ -10,6 +10,7 @@ permissions:
   contents: read
   pages: write
   id-token: write
+  administration: write
 
 concurrency:
   group: github-pages
@@ -21,6 +22,18 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+
+      - name: Ensure GitHub Pages uses Actions publishing
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -e
+          curl -fsSL -X PUT \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "X-GitHub-Api-Version: 2026-03-10" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/pages" \
+            -d '{"build_type":"workflow","source":{"branch":"main","path":"/"}}'
 
       - name: Setup Node.js
         uses: actions/setup-node@v6
