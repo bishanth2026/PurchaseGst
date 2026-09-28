@@ -56,20 +56,20 @@ export const Navbar: React.FC<NavbarProps> = ({
     <header className="sticky top-0 z-40 bg-slate-900/95 backdrop-blur border-b border-slate-800 text-slate-100">
       {/* Top tier brand and org selector */}
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="flex items-center justify-between h-16">
+        <div className="flex items-center justify-between gap-2 min-w-0 h-16">
           {/* Logo & Brand */}
-          <div className="flex items-center space-x-3">
+          <div className="flex items-center space-x-3 min-w-0 flex-1">
             <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-emerald-500 to-indigo-600 flex items-center justify-center shadow-lg shadow-emerald-500/20">
               <Building2 className="w-6 h-6 text-white" />
             </div>
             <div>
-              <div className="flex items-center space-x-2">
-                <span className="text-xl font-bold tracking-tight text-white">Biznexco</span>
-                <span className="text-xs px-2 py-0.5 rounded font-mono font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+              <div className="flex items-center space-x-2 min-w-0">
+                <span className="text-xl font-bold tracking-tight text-white shrink-0">Biznexco</span>
+                <span className="hidden sm:inline-flex text-xs px-2 py-0.5 rounded font-mono font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
                   GST Enterprise
                 </span>
               </div>
-              <p className="text-xs text-slate-400">Purchase Invoice Automation & 2B Reconciliation</p>
+              <p className="text-xs text-slate-400 truncate max-w-full">Purchase Invoice Automation & 2B Reconciliation</p>
             </div>
           </div>
 
@@ -118,7 +118,7 @@ export const Navbar: React.FC<NavbarProps> = ({
           </div>
 
           {/* Quick Actions */}
-          <div className="flex items-center space-x-3">
+          <div className="flex items-center space-x-3 shrink-0 max-w-[46vw]">
             <button
               onClick={onResetBenchmark}
               title="Reset to official 9-scenario GST test dataset"
