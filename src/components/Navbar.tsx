@@ -1,5 +1,6 @@
 import React from 'react';
 import {
+  Bot,
   Building2,
   Calendar,
   CheckCircle2,
@@ -41,6 +42,7 @@ export const Navbar: React.FC<NavbarProps> = ({
 
   const navTabs = [
     { id: 'dashboard', label: 'GST Dashboard', icon: Layers },
+    { id: 'agent', label: 'AI Invoice Agent', icon: Bot },
     { id: 'register', label: 'Purchase Register', icon: FileSpreadsheet },
     { id: 'upload', label: 'Batch Upload & OCR', icon: Upload },
     { id: 'gstr2b', label: 'GSTR-2B Import', icon: FileCheck },
