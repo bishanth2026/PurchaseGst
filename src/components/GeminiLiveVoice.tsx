@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Mic, MicOff, PhoneOff, Volume2 } from 'lucide-react';
 
 const TOKEN_ENDPOINT = 'https://obdkzsxdbaoudzudzazi.supabase.co/functions/v1/biznexco-live-token';
-const LIVE_WS = 'wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent';
+const LIVE_WS = 'wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContentConstrained';
 
 interface VoiceContext {
   organization: { name: string; gstin: string; currentReturnPeriod: string };
