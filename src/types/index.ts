@@ -65,6 +65,7 @@ export interface PurchaseInvoice {
   invoiceNumber: string;
   normalizedInvoiceNumber: string;
   invoiceDate: string; // YYYY-MM-DD
+  returnPeriod?: string; // normalized MM-YYYY; legacy records derive this from invoiceDate
   documentType: DocumentType;
   placeOfSupply: string; // 2-digit state code, e.g. "27"
   taxableValue: number;
