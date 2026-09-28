@@ -68,6 +68,41 @@ export const AiAssistantView: React.FC<AiAssistantViewProps> = ({
         total: reconciliations.length,
         ...counts,
       },
+      appWorkflows: {
+        invoiceUpload: {
+          navigation: 'Batch Upload & OCR',
+          steps: [
+            'Open Batch Upload & OCR from the top navigation.',
+            'Click Select Files (PDF/Images) or use the upload/drop area.',
+            'Supported invoice formats are PDF, PNG, JPG, JPEG and WEBP.',
+            'After selecting invoices, click Start AI Extraction.',
+            'The AI Invoice Agent extracts and validates invoice data.',
+            'Invoices that need human verification appear as REVIEW REQUIRED.',
+            'Review the extracted invoice and click Approve After Review when the data is verified.',
+            'Click Commit to Purchase Register to save approved invoices.'
+          ]
+        },
+        manualInvoice: {
+          navigation: 'Purchase Register',
+          steps: [
+            'Open Purchase Register.',
+            'Click New Invoice.',
+            'Enter the purchase invoice details and save the invoice.'
+          ]
+        },
+        gstr2b: {
+          navigation: 'GSTR-2B Import',
+          steps: [
+            'Open GSTR-2B Import.',
+            'Import the GSTR-2B file and complete the import.',
+            'Run reconciliation to compare Books with GSTR-2B for the selected return period.'
+          ]
+        },
+        reconciliation: {
+          navigation: 'Reconciliation Engine',
+          purpose: 'Compare purchase books with GSTR-2B and classify matching, probable, mismatch and missing records.'
+        }
+      }
     };
   }, [organization, invoices, gstr2bCount, reconciliations]);
 
