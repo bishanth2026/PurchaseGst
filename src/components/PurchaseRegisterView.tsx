@@ -72,7 +72,7 @@ export const PurchaseRegisterView: React.FC<PurchaseRegisterViewProps> = ({
 
       return true;
     });
-  }, [invoices, searchTerm, docTypeFilter, statusFilter, itcFilter]);
+  }, [invoices, organization.currentReturnPeriod, searchTerm, docTypeFilter, statusFilter, itcFilter]);
 
   // Aggregate totals of filtered list
   const totals = useMemo(() => {
