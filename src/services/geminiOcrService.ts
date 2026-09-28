@@ -72,8 +72,12 @@ export async function extractInvoiceDataFromFile(
   }
 
   let response: Response;
+  const configuredBackend =
+    (typeof import.meta !== 'undefined' && (import.meta as any).env?.VITE_OCR_BACKEND_URL) ||
+    'https://obdkzsxdbaoudzudzazi.supabase.co/functions/v1/biznexco-ocr';
+
   try {
-    response = await fetch('/api/ocr-extract', {
+    response = await fetch(configuredBackend, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
