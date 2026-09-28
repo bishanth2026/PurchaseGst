@@ -15,6 +15,32 @@
   </head>
   <body class="bg-slate-950 text-slate-100 antialiased font-sans">
     <div id="root"></div>
+    <script>
+      (function () {
+        var KEY = 'biznexco_boot_retry';
+        var retried = false;
+        try { retried = sessionStorage.getItem(KEY) === '1'; } catch (_) {}
+        window.setTimeout(function () {
+          var root = document.getElementById('root');
+          if (root && root.childElementCount === 0) {
+            if (!retried) {
+              try { sessionStorage.setItem(KEY, '1'); } catch (_) {}
+              var url = new URL(window.location.href);
+              url.searchParams.set('__fresh', String(Date.now()));
+              window.location.replace(url.toString());
+            } else {
+              root.innerHTML =
+                '<div style="min-height:100vh;background:#020617;color:#e2e8f0;display:flex;align-items:center;justify-content:center;padding:24px;font-family:system-ui,sans-serif">' +
+                '<div style="max-width:640px;background:#0f172a;border:1px solid #334155;border-radius:16px;padding:28px">' +
+                '<h2 style="margin:0 0 10px;font-size:20px">Biznexco could not start</h2>' +
+                '<p style="margin:0;color:#94a3b8;font-size:14px;line-height:1.6">The browser received the page, but the application JavaScript did not start. A fresh-load recovery was already attempted. Your saved invoice data has not been cleared.</p>' +
+                '<button onclick="location.reload()" style="margin-top:18px;padding:10px 16px;border:0;border-radius:8px;background:#059669;color:white;font-weight:700;cursor:pointer">Try Again</button>' +
+                '</div></div>';
+            }
+          }
+        }, 4000);
+      })();
+    </script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
