@@ -166,6 +166,7 @@ export class InvoiceService {
     const org = this.getOrganization();
 
     updatedInvoice.normalizedInvoiceNumber = normalizeInvoiceNumber(updatedInvoice.invoiceNumber);
+    updatedInvoice.returnPeriod = updatedInvoice.returnPeriod || getInvoiceReturnPeriod(updatedInvoice) || org.currentReturnPeriod;
     const validation = validatePurchaseInvoice(updatedInvoice, org.gstin, invoices);
     updatedInvoice.validationErrors = validation.errors;
     updatedInvoice.updatedAt = new Date().toISOString();
@@ -360,10 +361,14 @@ export class InvoiceService {
 
   // RECONCILIATION
   public static getReconciliationResults(): ReconciliationItem[] {
+    const org = this.getOrganization();
     const data = safeGetItem(STORAGE_KEY_RECON);
     if (data) {
       try {
-        return JSON.parse(data);
+        const current = JSON.parse(data).filter((item: ReconciliationItem) =>
+          isInReturnPeriod(item.returnPeriod, org.currentReturnPeriod)
+        );
+        if (current.length > 0) return current;
       } catch {}
     }
     // Compute fresh reconciliation from existing data
@@ -380,7 +385,14 @@ export class InvoiceService {
   }
 
   public static saveReconciliationResults(results: ReconciliationItem[]): void {
-    safeSetItem(STORAGE_KEY_RECON, JSON.stringify(results));
+    const org = this.getOrganization();
+    const existingRaw = safeGetItem(STORAGE_KEY_RECON);
+    let existing: ReconciliationItem[] = [];
+    if (existingRaw) {
+      try { existing = JSON.parse(existingRaw); } catch {}
+    }
+    const preserved = existing.filter((item) => !isInReturnPeriod(item.returnPeriod, org.currentReturnPeriod));
+    safeSetItem(STORAGE_KEY_RECON, JSON.stringify([...preserved, ...results]));
   }
 
   public static executeReconciliation(): ReconciliationItem[] {
