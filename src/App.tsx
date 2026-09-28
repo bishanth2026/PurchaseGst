@@ -10,6 +10,7 @@ import { ManualInvoiceModal } from './components/ManualInvoiceModal';
 import { SupabaseSettingsModal } from './components/SupabaseSettingsModal';
 import { DeleteConfirmationModal } from './components/DeleteConfirmationModal';
 import { AiAgentView } from './components/AiAgentView';
+import { AiAssistantView } from './components/AiAssistantView';
 
 import { Organization, PurchaseInvoice, UserRole } from './types';
 import { InvoiceService } from './services/invoiceService';
@@ -253,6 +254,15 @@ export default function App() {
             organization={organization}
             onNavigateTab={setActiveTab}
             onRunReconciliation={handleRunReconciliation}
+          />
+        )}
+
+        {activeTab === 'assistant' && (
+          <AiAssistantView
+            organization={organization}
+            invoices={periodScopedInvoices}
+            gstr2bCount={periodScopedGstr2bRecords.length}
+            reconciliations={periodScopedReconciliations}
           />
         )}
 
