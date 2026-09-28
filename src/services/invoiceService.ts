@@ -371,16 +371,33 @@ export class InvoiceService {
         if (current.length > 0) return current;
       } catch {}
     }
-    // Compute fresh reconciliation from existing data
-    const allBooks = this.getInvoices();
-    const allGstr2b = this.getGSTR2BRecords();
-    const books = allBooks.filter((invoice) => isInReturnPeriod(getInvoiceReturnPeriod(invoice), org.currentReturnPeriod));
-    const gstr2b = allGstr2b.filter((record) => isInReturnPeriod(getGstr2bReturnPeriod(record), org.currentReturnPeriod));
-    const stored = safeGetItem(STORAGE_KEY_RECON);
-    const existing = stored ? (() => { try { return JSON.parse(stored).filter((r: ReconciliationItem) => isInReturnPeriod(r.returnPeriod, org.currentReturnPeriod)); } catch { return []; } })() : [];
-    const results = runReconciliation(books, gstr2b, org.currentReturnPeriod, existing);
-    this.saveReconciliationResults(results);
-    return results;
+    // Compute fresh reconciliation from existing data.
+    // Never let a malformed legacy/local record prevent the entire application from rendering.
+    try {
+      const allBooks = this.getInvoices();
+      const allGstr2b = this.getGSTR2BRecords();
+      const books = allBooks.filter((invoice) => isInReturnPeriod(getInvoiceReturnPeriod(invoice), org.currentReturnPeriod));
+      const gstr2b = allGstr2b.filter((record) => isInReturnPeriod(getGstr2bReturnPeriod(record), org.currentReturnPeriod));
+      const stored = safeGetItem(STORAGE_KEY_RECON);
+      const existing = stored
+        ? (() => {
+            try {
+              const parsed = JSON.parse(stored);
+              return Array.isArray(parsed)
+                ? parsed.filter((r: ReconciliationItem) => isInReturnPeriod(r.returnPeriod, org.currentReturnPeriod))
+                : [];
+            } catch {
+              return [];
+            }
+          })()
+        : [];
+      const results = runReconciliation(books, gstr2b, org.currentReturnPeriod, existing);
+      this.saveReconciliationResults(results);
+      return results;
+    } catch (error) {
+      console.error('[InvoiceService] Failed to initialize reconciliation data:', error);
+      return [];
+    }
   }
 
   public static saveReconciliationResults(results: ReconciliationItem[]): void {
