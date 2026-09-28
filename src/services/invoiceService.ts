@@ -374,7 +374,6 @@ export class InvoiceService {
     // Compute fresh reconciliation from existing data
     const allBooks = this.getInvoices();
     const allGstr2b = this.getGSTR2BRecords();
-    const org = this.getOrganization();
     const books = allBooks.filter((invoice) => isInReturnPeriod(getInvoiceReturnPeriod(invoice), org.currentReturnPeriod));
     const gstr2b = allGstr2b.filter((record) => isInReturnPeriod(getGstr2bReturnPeriod(record), org.currentReturnPeriod));
     const stored = safeGetItem(STORAGE_KEY_RECON);
