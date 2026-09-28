@@ -73,6 +73,8 @@ export const GeminiLiveVoice: React.FC<GeminiLiveVoiceProps> = ({ language, cont
   const sourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
   const nextPlayTimeRef = useRef(0);
   const mountedRef = useRef(true);
+  const setupReadyRef = useRef(false);
+  const stopRequestedRef = useRef(false);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -104,22 +106,33 @@ export const GeminiLiveVoice: React.FC<GeminiLiveVoiceProps> = ({ language, cont
     nextPlayTimeRef.current = startAt + buffer.duration;
   };
 
-  const cleanup = () => {
+  const cleanup = (closeSocket = true) => {
     try { processorRef.current?.disconnect(); } catch {}
     try { sourceRef.current?.disconnect(); } catch {}
     try { streamRef.current?.getTracks().forEach((track) => track.stop()); } catch {}
-    try { wsRef.current?.close(); } catch {}
+    if (closeSocket) {
+      try { wsRef.current?.close(); } catch {}
+      wsRef.current = null;
+    }
     try { audioContextRef.current?.close(); } catch {}
     processorRef.current = null;
     sourceRef.current = null;
     streamRef.current = null;
-    wsRef.current = null;
     audioContextRef.current = null;
+    setupReadyRef.current = false;
     nextPlayTimeRef.current = 0;
   };
 
   const stopVoice = () => {
-    cleanup();
+    stopRequestedRef.current = true;
+    // Stop microphone capture immediately, but keep the WebSocket briefly so
+    // Gemini can deliver the final input/output transcription frame.
+    cleanup(false);
+    const socket = wsRef.current;
+    window.setTimeout(() => {
+      try { socket?.close(); } catch {}
+      if (wsRef.current === socket) wsRef.current = null;
+    }, 500);
     if (mountedRef.current) {
       setActive(false);
       setConnecting(false);
@@ -131,6 +144,8 @@ export const GeminiLiveVoice: React.FC<GeminiLiveVoiceProps> = ({ language, cont
     setError('');
     setInputTranscript('');
     setOutputTranscript('');
+    setupReadyRef.current = false;
+    stopRequestedRef.current = false;
     setConnecting(true);
 
     try {
@@ -195,6 +210,14 @@ export const GeminiLiveVoice: React.FC<GeminiLiveVoiceProps> = ({ language, cont
       websocket.onmessage = (event) => {
         try {
           const message = JSON.parse(event.data);
+          if (message?.setupComplete) {
+            setupReadyRef.current = true;
+            return;
+          }
+          if (message?.error) {
+            setError(message.error?.message || 'Gemini Live returned an error.');
+            return;
+          }
           const content = message?.serverContent;
 
           if (content?.interrupted) {
@@ -224,7 +247,7 @@ export const GeminiLiveVoice: React.FC<GeminiLiveVoiceProps> = ({ language, cont
       };
 
       websocket.onclose = (event) => {
-        if (mountedRef.current && active) {
+        if (mountedRef.current && !stopRequestedRef.current && active) {
           setError(event.reason || 'Voice session ended.');
           setActive(false);
           setConnecting(false);
@@ -238,7 +261,7 @@ export const GeminiLiveVoice: React.FC<GeminiLiveVoiceProps> = ({ language, cont
 
       processor.onaudioprocess = (event) => {
         const socket = wsRef.current;
-        if (!socket || socket.readyState !== WebSocket.OPEN) return;
+        if (!socket || socket.readyState !== WebSocket.OPEN || !setupReadyRef.current || stopRequestedRef.current) return;
         const input = event.inputBuffer.getChannelData(0);
         const pcm = floatToPcm16(input, 16000, audioContext.sampleRate);
         socket.send(JSON.stringify({
