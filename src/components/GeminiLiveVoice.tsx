@@ -79,6 +79,11 @@ export const GeminiLiveVoice: React.FC<GeminiLiveVoiceProps> = ({ language, cont
   const reconnectTimerRef = useRef<number | null>(null);
   const reconnectAttemptRef = useRef(0);
   const sessionHandleRef = useRef<string | null>(null);
+  // Gemini ephemeral tokens are single-use for starting a new session, but the
+  // same token can be used to resume that session. Keep the original token for
+  // resumption instead of provisioning a brand-new token on every reconnect.
+  const liveTokenRef = useRef<string | null>(null);
+  const liveTokenExpiresAtRef = useRef<number>(0);
   const systemInstructionRef = useRef('');
   const selectedLanguageRef = useRef<'en-IN' | 'ml-IN'>(selectedLanguage);
   const nextPlayTimeRef = useRef(0);
@@ -183,8 +188,26 @@ export const GeminiLiveVoice: React.FC<GeminiLiveVoiceProps> = ({ language, cont
     return payload;
   };
 
-  const connectLiveSession = async (resumeHandle: string | null = null) => {
-    const tokenPayload = await getToken();
+  const connectLiveSession = async (resumeHandle: string | null = null, forceFreshToken = false) => {
+    let tokenPayload: any;
+
+    // A resumption must use the token that created the original Live session.
+    // Provisioning a new token here creates a different authorization context
+    // and can cause the resumed WebSocket to be rejected.
+    const cachedToken = liveTokenRef.current;
+    const cachedExpiry = liveTokenExpiresAtRef.current;
+    if (!forceFreshToken && resumeHandle && cachedToken && Date.now() < cachedExpiry) {
+      tokenPayload = {
+        token: cachedToken,
+        model: 'gemini-3.8-live',
+      };
+    } else {
+      tokenPayload = await getToken();
+      liveTokenRef.current = tokenPayload.token;
+      liveTokenExpiresAtRef.current = tokenPayload.expiresAt
+        ? new Date(tokenPayload.expiresAt).getTime()
+        : Date.now() + 29 * 60 * 1000;
+    }
     const ai = new GoogleGenAI({ apiKey: tokenPayload.token });
     const model = tokenPayload.model || 'gemini-3.8-live';
     let session: any = null;
@@ -345,7 +368,7 @@ export const GeminiLiveVoice: React.FC<GeminiLiveVoiceProps> = ({ language, cont
       } catch (resumeError) {
         if (resumeHandle) {
           sessionHandleRef.current = null;
-          await connectLiveSession(null);
+          await connectLiveSession(null, true);
         } else {
           throw resumeError;
         }
@@ -361,6 +384,8 @@ export const GeminiLiveVoice: React.FC<GeminiLiveVoiceProps> = ({ language, cont
     manualStopRef.current = false;
     clearReconnectTimer();
     sessionHandleRef.current = null;
+    liveTokenRef.current = null;
+    liveTokenExpiresAtRef.current = 0;
     reconnectAttemptRef.current = 0;
     setError('');
     setInputTranscript('');
