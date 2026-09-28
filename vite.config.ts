@@ -5,6 +5,8 @@ import {defineConfig} from 'vite';
 
 export default defineConfig(() => {
   return {
+    // GitHub Pages serves the app from the /PurchaseGst/ project path.
+    base: '/PurchaseGst/',
     plugins: [react(), tailwindcss()],
     resolve: {
       alias: {
