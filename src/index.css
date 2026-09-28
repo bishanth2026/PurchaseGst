@@ -1,22 +1,30 @@
 @import "tailwindcss";
 
-/* iOS Safari mobile form controls:
-   Keep the computed text size at 16px or larger so focusing an input does
-   not trigger Safari's automatic page zoom. The !important override is
-   intentional because utility classes can otherwise win the cascade. */
+/* Mobile Safari: prevent focused form controls from triggering page zoom. */
 @media (pointer: coarse) {
-  html {
+  html,
+  body {
+    width: 100%;
+    max-width: 100%;
+    overflow-x: hidden;
     -webkit-text-size-adjust: 100%;
+    overscroll-behavior-x: none;
+  }
+
+  input,
+  textarea,
+  select,
+  button,
+  [contenteditable="true"] {
+    max-width: 100%;
   }
 
   input,
   textarea,
   select,
   [contenteditable="true"] {
+    /* iOS Safari uses the rendered form-control size when deciding whether
+       to zoom the page on focus. Keep it at the safe 16px threshold. */
     font-size: 16px !important;
-  }
-
-  body {
-    overflow-x: hidden;
   }
 }
