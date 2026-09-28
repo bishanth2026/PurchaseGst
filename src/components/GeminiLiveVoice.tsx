@@ -235,7 +235,7 @@ export const GeminiLiveVoice: React.FC<GeminiLiveVoiceProps> = ({ language, cont
                 },
               },
             },
-            inputAudioTranscription: {},
+            inputAudioTranscription: { languageCodes: [selectedLanguage], mode: 'SMART' },
             outputAudioTranscription: {},
             systemInstruction: { parts: [{ text: systemInstruction }] },
           },
@@ -354,7 +354,10 @@ export const GeminiLiveVoice: React.FC<GeminiLiveVoiceProps> = ({ language, cont
       };
 
       source.connect(processor);
-      processor.connect(audioContext.destination);
+      const silentGain = audioContext.createGain();
+      silentGain.gain.value = 0;
+      processor.connect(silentGain);
+      silentGain.connect(audioContext.destination);
 
       setActive(true);
       setConnecting(false);
