@@ -64,6 +64,7 @@ export const GeminiLiveVoice: React.FC<GeminiLiveVoiceProps> = ({ language, cont
   const [error, setError] = useState('');
   const [inputTranscript, setInputTranscript] = useState('');
   const [outputTranscript, setOutputTranscript] = useState('');
+  const [selectedLanguage, setSelectedLanguage] = useState<'en-IN' | 'ml-IN'>('en-IN');
 
   const wsRef = useRef<WebSocket | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -143,7 +144,7 @@ export const GeminiLiveVoice: React.FC<GeminiLiveVoiceProps> = ({ language, cont
       const tokenResponse = await fetch(TOKEN_ENDPOINT, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ language }),
+        body: JSON.stringify({ language: selectedLanguage }),
       });
       const tokenPayload = await tokenResponse.json().catch(() => ({}));
       if (!tokenResponse.ok || !tokenPayload?.token) {
@@ -161,7 +162,7 @@ export const GeminiLiveVoice: React.FC<GeminiLiveVoiceProps> = ({ language, cont
         const systemInstruction = [
           'You are the Biznexco real-time voice assistant.',
           'Answer questions about GST, accounting, finance, business, and the Biznexco Purchase Invoice Automation application.',
-          `Speak naturally in the user's selected language: ${language === 'ml-IN' ? 'Malayalam' : 'English (India)'}.`,
+          `Speak naturally in the user's selected language: ${selectedLanguage === 'ml-IN' ? 'Malayalam' : 'English (India)'}.`,
           'Use only the supplied current-app context for claims about live invoice counts, amounts, suppliers, reconciliation results, ITC, dates, and statuses.',
           'Never invent app data. If the supplied context does not contain the answer, say that it is not available.',
           'You are read-only in this voice phase. Do not claim that you approved, deleted, changed, uploaded, or reconciled anything.',
@@ -281,6 +282,16 @@ export const GeminiLiveVoice: React.FC<GeminiLiveVoiceProps> = ({ language, cont
           {active ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
           {connecting ? 'Connecting…' : active ? 'Stop Voice' : 'Start Live Voice'}
         </button>
+        <select
+          value={selectedLanguage}
+          onChange={(e) => setSelectedLanguage(e.target.value as 'en-IN' | 'ml-IN')}
+          disabled={active || connecting}
+          className="bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-2 text-xs text-slate-300"
+          aria-label="Voice language"
+        >
+          <option value="en-IN">English (India)</option>
+          <option value="ml-IN">Malayalam</option>
+        </select>
         <div className="inline-flex items-center gap-2 text-xs text-slate-400">
           <Volume2 className="w-4 h-4 text-indigo-300" />
           Gemini Live • {language === 'ml-IN' ? 'Malayalam' : 'English'}
