@@ -34,69 +34,6 @@ export const AiAssistantView: React.FC<AiAssistantViewProps> = ({
   ]);
   const [input, setInput] = useState('');
   const [busy, setBusy] = useState(false);
-
-  const context = useMemo(() => {
-    const counts = {
-      matched: reconciliations.filter((r) => r.matchType === 'EXACT').length,
-      probable: reconciliations.filter((r) => r.matchType === 'PROBABLE').length,
-      mismatches: reconciliations.filter((r) => ['MISMATCH_VALUE', 'MISMATCH_TAX', 'CRN_DBN_DIFF'].includes(r.matchType)).length,
-      missingIn2B: reconciliations.filter((r) => r.matchType === 'MISSING_IN_2B').length,
-      missingInBooks: reconciliations.filter((r) => r.matchType === 'MISSING_IN_BOOKS').length,
-    };
-
-    return {
-      organization: {
-        name: organization.name,
-        gstin: organization.gstin,
-        currentReturnPeriod: organization.currentReturnPeriod,
-      },
-      invoices: invoices.slice(0, 200).map((invoice) => ({
-        invoiceNumber: invoice.invoiceNumber,
-        supplierName: invoice.supplierName,
-        supplierGstin: invoice.supplierGstin,
-        invoiceDate: invoice.invoiceDate,
-        totalAmount: invoice.totalAmount,
-        taxableValue: invoice.taxableValue,
-        totalTax: invoice.cgstAmount + invoice.sgstAmount + invoice.igstAmount + invoice.cessAmount,
-        itcEligibility: invoice.itcEligibility,
-        status: invoice.status,
-        returnPeriod: invoice.returnPeriod,
-      })),
-      gstr2bCount,
-      reconciliationSummary: {
-        total: reconciliations.length,
-        ...counts,
-      },
-    };
-  }, [organization, invoices, gstr2bCount, reconciliations]);
-
-  const send = async (preset?: string) => {
-    const question = (preset ?? input).trim();
-    if (!question || busy) return;
-
-    const nextMessages: AiAssistantMessage[] = [...messages, { role: 'user', content: question }];
-    setMessages(nextMessages);
-    setInput('');
-    setBusy(true);
-
-    try {
-      const answer = await askBiznexcoAi(question, context, nextMessages);
-      setMessages((prev) => [...prev, { role: 'assistant', content: answer }]);
-    } catch (error: any) {
-      setMessages((prev) => [
-        ...prev,
-        {
-          role: 'assistant',
-          content:
-            error?.message ||
-            'The AI Assistant could not complete the request. Check the AI service configuration.',
-        },
-      ]);
-    } finally {
-      setBusy(false);
-    }
-  };
-
   const clearChat = () => {
     setMessages([
       {
@@ -122,7 +59,7 @@ export const AiAssistantView: React.FC<AiAssistantViewProps> = ({
             Ask common questions or ask about the current Purchase Register, GSTR-2B and reconciliation data.
           </p>
           <GeminiLiveVoice
-            language="ml-IN"
+            language="en-IN"
             context={{
               organization: context.organization,
               invoiceCount: invoices.length,
