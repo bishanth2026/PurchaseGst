@@ -36,11 +36,11 @@ export const AiAssistantView: React.FC<AiAssistantViewProps> = ({
 
   const context = useMemo(() => {
     const counts = {
-      matched: reconciliations.filter((r) => r.status === 'MATCHED').length,
-      probable: reconciliations.filter((r) => r.status === 'PROBABLE').length,
-      mismatches: reconciliations.filter((r) => r.status === 'MISMATCH').length,
-      missingIn2B: reconciliations.filter((r) => r.status === 'MISSING_IN_2B').length,
-      missingInBooks: reconciliations.filter((r) => r.status === 'MISSING_IN_BOOKS').length,
+      matched: reconciliations.filter((r) => r.matchType === 'EXACT').length,
+      probable: reconciliations.filter((r) => r.matchType === 'PROBABLE').length,
+      mismatches: reconciliations.filter((r) => ['MISMATCH_VALUE', 'MISMATCH_TAX', 'CRN_DBN_DIFF'].includes(r.matchType)).length,
+      missingIn2B: reconciliations.filter((r) => r.matchType === 'MISSING_IN_2B').length,
+      missingInBooks: reconciliations.filter((r) => r.matchType === 'MISSING_IN_BOOKS').length,
     };
 
     return {
