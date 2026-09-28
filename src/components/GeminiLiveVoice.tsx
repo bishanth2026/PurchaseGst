@@ -205,7 +205,7 @@ export const GeminiLiveVoice: React.FC<GeminiLiveVoiceProps> = ({ language, cont
       audioContextRef.current = audioContext;
       await audioContext.resume();
 
-      const websocket = new WebSocket(`${LIVE_WS}?access_token=${encodeURIComponent(tokenPayload.token)}`);
+      const websocket = new WebSocket(`${LIVE_WS}?access_token=${encodeURIComponent(tokenPayload.token)}`);\n      // Safari/iOS may deliver Gemini server frames as Blob/ArrayBuffer.\n      // Normalize binary frames below instead of passing Blob directly to JSON.parse.\n      websocket.binaryType = 'arraybuffer';
       wsRef.current = websocket;
 
       websocket.onopen = () => {
@@ -242,35 +242,61 @@ export const GeminiLiveVoice: React.FC<GeminiLiveVoiceProps> = ({ language, cont
         }));
       };
 
-      websocket.onmessage = (event) => {
+      websocket.onmessage = async (event) => {
         try {
-          const message = JSON.parse(event.data);
+          let raw: string;
+          if (typeof event.data === 'string') {
+            raw = event.data;
+          } else if (event.data instanceof Blob) {
+            raw = await event.data.text();
+          } else if (event.data instanceof ArrayBuffer) {
+            raw = new TextDecoder().decode(event.data);
+          } else {
+            raw = String(event.data);
+          }
+
+          const message = JSON.parse(raw);
+
           if (message?.setupComplete) {
             setupReadyRef.current = true;
             return;
           }
+
           if (message?.error) {
             setError(message.error?.message || 'Gemini Live returned an error.');
             return;
           }
-          const content = message?.serverContent;
 
-          if (content?.turnComplete && stopRequestedRef.current) {
-            // Final inputTranscription/outputTranscription frames have now
-            // arrived; safely close the session without losing them.
-            closeVoiceSession();
-            return;
+          const content = message?.serverContent;
+          if (!content) return;
+
+          // Gemini can deliver interim input transcription while the user is
+          // speaking. The final inputTranscription may arrive in a different
+          // message and is not guaranteed to be ordered relative to turnComplete.
+          const interim = content?.interimInputTranscription?.text;
+          if (interim) {
+            setInputTranscript((prev) => {
+              // Replace the current interim tail rather than duplicating it.
+              const marker = '…';
+              const base = prev.endsWith(marker) ? prev.slice(0, -marker.length) : prev;
+              return base + interim + marker;
+            });
+          }
+
+          if (content?.inputTranscription?.text) {
+            setInputTranscript((prev) => {
+              const marker = '…';
+              const base = prev.endsWith(marker) ? prev.slice(0, -marker.length) : prev;
+              return base + content.inputTranscription.text;
+            });
+          }
+
+          if (content?.outputTranscription?.text) {
+            setOutputTranscript((prev) => prev + content.outputTranscription.text);
           }
 
           if (content?.interrupted) {
             stopPlayback();
-          }
-
-          if (content?.inputTranscription?.text) {
-            setInputTranscript((prev) => prev + content.inputTranscription.text);
-          }
-          if (content?.outputTranscription?.text) {
-            setOutputTranscript((prev) => prev + content.outputTranscription.text);
           }
 
           const parts = content?.modelTurn?.parts || [];
@@ -279,8 +305,19 @@ export const GeminiLiveVoice: React.FC<GeminiLiveVoiceProps> = ({ language, cont
               playPcm24k(base64ToBytes(part.inlineData.data));
             }
           }
-        } catch {
-          // Ignore malformed streaming frames.
+
+          // IMPORTANT: transcription ordering is not guaranteed. Process all
+          // transcript fields in this message BEFORE closing on turnComplete.
+          if (content?.turnComplete && stopRequestedRef.current) {
+            closeVoiceSession();
+          }
+        } catch (e) {
+          // Keep the connection alive, but expose parse failures instead of
+          // silently swallowing them. This is especially important on Safari.
+          if (mountedRef.current) {
+            const detail = e instanceof Error ? e.message : 'Unknown WebSocket frame error';
+            setError(`Gemini Live message could not be decoded: ${detail}`);
+          }
         }
       };
 
