@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { Bot, Send, Sparkles, Database, BookOpen, RotateCcw } from 'lucide-react';
+import { Bot, Send, Sparkles, Database, BookOpen, RotateCcw, Mic, MicOff, Volume2, VolumeX } from 'lucide-react';
 import { PurchaseInvoice, Organization } from '../types';
 import { ReconciliationItem } from '../types';
 import { askBiznexcoAi, AiAssistantMessage } from '../services/aiAssistantService';
@@ -33,6 +33,36 @@ export const AiAssistantView: React.FC<AiAssistantViewProps> = ({
   ]);
   const [input, setInput] = useState('');
   const [busy, setBusy] = useState(false);
+  const [listening, setListening] = useState(false);
+  const [speaking, setSpeaking] = useState(false);
+  const [voiceLanguage, setVoiceLanguage] = useState<'en-IN' | 'ml-IN'>('en-IN');
+  const [voiceError, setVoiceError] = useState('');
+
+  const speakAnswer = (text: string) => {
+    if (!('speechSynthesis' in window)) {
+      setVoiceError('Voice playback is not supported by this browser.');
+      return;
+    }
+    window.speechSynthesis.cancel();
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.lang = voiceLanguage;
+    utterance.rate = 0.95;
+    utterance.pitch = 1;
+    const voices = window.speechSynthesis.getVoices();
+    const preferred = voices.find((voice) =>
+      voice.lang.toLowerCase().startsWith(voiceLanguage.toLowerCase())
+    );
+    if (preferred) utterance.voice = preferred;
+    utterance.onstart = () => setSpeaking(true);
+    utterance.onend = () => setSpeaking(false);
+    utterance.onerror = () => setSpeaking(false);
+    window.speechSynthesis.speak(utterance);
+  };
+
+  const stopSpeaking = () => {
+    if ('speechSynthesis' in window) window.speechSynthesis.cancel();
+    setSpeaking(false);
+  };
 
   const context = useMemo(() => {
     const counts = {
@@ -81,6 +111,7 @@ export const AiAssistantView: React.FC<AiAssistantViewProps> = ({
     try {
       const answer = await askBiznexcoAi(question, context, nextMessages);
       setMessages((prev) => [...prev, { role: 'assistant', content: answer }]);
+      speakAnswer(answer);
     } catch (error: any) {
       setMessages((prev) => [
         ...prev,
@@ -93,6 +124,50 @@ export const AiAssistantView: React.FC<AiAssistantViewProps> = ({
       ]);
     } finally {
       setBusy(false);
+    }
+  };
+
+  const startVoiceInput = () => {
+    setVoiceError('');
+    const SpeechRecognitionCtor =
+      (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SpeechRecognitionCtor) {
+      setVoiceError('Voice input is not supported in this browser. Please use a recent Chrome or Edge browser.');
+      return;
+    }
+    if (busy) return;
+
+    const recognition = new SpeechRecognitionCtor();
+    recognition.lang = voiceLanguage;
+    recognition.continuous = false;
+    recognition.interimResults = false;
+    recognition.maxAlternatives = 1;
+
+    recognition.onstart = () => setListening(true);
+    recognition.onend = () => setListening(false);
+    recognition.onerror = (event: any) => {
+      setListening(false);
+      if (event?.error === 'not-allowed' || event?.error === 'service-not-allowed') {
+        setVoiceError('Microphone permission was denied. Allow microphone access for this site and try again.');
+      } else if (event?.error !== 'aborted') {
+        setVoiceError('Voice input could not be recognized. Please try again.');
+      }
+    };
+    recognition.onresult = (event: any) => {
+      const transcript = String(event?.results?.[0]?.[0]?.transcript || '').trim();
+      if (!transcript) {
+        setVoiceError('I could not hear a clear question. Please try again.');
+        return;
+      }
+      setInput(transcript);
+      void send(transcript);
+    };
+
+    try {
+      recognition.start();
+    } catch {
+      setListening(false);
+      setVoiceError('Could not start the microphone. Please try again.');
     }
   };
 
@@ -120,6 +195,42 @@ export const AiAssistantView: React.FC<AiAssistantViewProps> = ({
           <p className="text-xs text-slate-400 mt-1">
             Ask common questions or ask about the current Purchase Register, GSTR-2B and reconciliation data.
           </p>
+          <div className="flex flex-wrap items-center gap-2 mt-3">
+            <button
+              onClick={startVoiceInput}
+              disabled={busy || listening}
+              className={listening
+                ? 'inline-flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-semibold border bg-rose-500/15 border-rose-500/40 text-rose-300'
+                : 'inline-flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-semibold border bg-indigo-500/10 border-indigo-500/30 text-indigo-300 hover:bg-indigo-500/20'}
+              title="Ask Biznexco using your microphone"
+            >
+              {listening ? <MicOff className="w-4 h-4 animate-pulse" /> : <Mic className="w-4 h-4" />}
+              {listening ? 'Listening…' : 'Ask by Voice'}
+            </button>
+            <button
+              onClick={speaking ? stopSpeaking : undefined}
+              disabled={!speaking}
+              className="inline-flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-semibold border border-slate-700 bg-slate-900 text-slate-300 disabled:opacity-40"
+              title={speaking ? 'Stop voice response' : 'Voice response is idle'}
+            >
+              {speaking ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
+              {speaking ? 'Stop Voice' : 'Voice Reply'}
+            </button>
+            <select
+              value={voiceLanguage}
+              onChange={(e) => setVoiceLanguage(e.target.value as 'en-IN' | 'ml-IN')}
+              className="bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-2 text-xs text-slate-300"
+              aria-label="Voice language"
+            >
+              <option value="en-IN">English (India)</option>
+              <option value="ml-IN">Malayalam</option>
+            </select>
+          </div>
+          {voiceError && (
+            <div className="mt-2 text-xs text-amber-300 bg-amber-500/10 border border-amber-500/20 rounded-lg px-3 py-2">
+              {voiceError}
+            </div>
+          )}
         </div>
         <button
           onClick={clearChat}
