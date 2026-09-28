@@ -22,7 +22,14 @@ export default function App() {
 
   const [invoices, setInvoices] = useState<PurchaseInvoice[]>(() => InvoiceService.getInvoices());
   const [gstr2bRecords, setGstr2bRecords] = useState(() => InvoiceService.getGSTR2BRecords());
-  const [reconciliations, setReconciliations] = useState(() => InvoiceService.getReconciliationResults());
+  const [reconciliations, setReconciliations] = useState(() => {
+    try {
+      return InvoiceService.getReconciliationResults();
+    } catch (error) {
+      console.error('[App] Failed to initialize reconciliation state:', error);
+      return [];
+    }
+  });
 
   // Modal states
   const [isInvoiceModalOpen, setIsInvoiceModalOpen] = useState(false);
@@ -215,7 +222,12 @@ export default function App() {
   );
 
   const metrics = useMemo(() => {
-    return computeDashboardMetrics(periodScopedInvoices, periodScopedGstr2bRecords, periodScopedReconciliations);
+    try {
+      return computeDashboardMetrics(periodScopedInvoices, periodScopedGstr2bRecords, periodScopedReconciliations);
+    } catch (error) {
+      console.error('[App] Failed to calculate dashboard metrics:', error);
+      return computeDashboardMetrics([], [], []);
+    }
   }, [periodScopedInvoices, periodScopedGstr2bRecords, periodScopedReconciliations]);
 
   return (
