@@ -67,7 +67,10 @@ export class InvoiceService {
     const saved = safeGetItem(STORAGE_KEY_ORG);
     if (saved) {
       try {
-        this.currentOrg = JSON.parse(saved);
+        const parsed = JSON.parse(saved);
+        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+          this.currentOrg = { ...DEFAULT_ORG, ...parsed, currentReturnPeriod: typeof parsed.currentReturnPeriod === 'string' ? parsed.currentReturnPeriod : DEFAULT_ORG.currentReturnPeriod };
+        }
       } catch {}
     }
     return this.currentOrg;
@@ -94,7 +97,8 @@ export class InvoiceService {
       return BENCHMARK_BOOKS_INVOICES;
     }
     try {
-      return JSON.parse(data);
+      const parsed = JSON.parse(data);
+      return Array.isArray(parsed) ? parsed.filter((item) => item && typeof item === 'object') : [];
     } catch {
       return [];
     }
@@ -338,7 +342,8 @@ export class InvoiceService {
       return BENCHMARK_GSTR2B_RECORDS;
     }
     try {
-      return JSON.parse(data);
+      const parsed = JSON.parse(data);
+      return Array.isArray(parsed) ? parsed.filter((item) => item && typeof item === 'object') : [];
     } catch {
       return [];
     }
