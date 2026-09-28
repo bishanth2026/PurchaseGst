@@ -77,6 +77,7 @@ export const GeminiLiveVoice: React.FC<GeminiLiveVoiceProps> = ({ language, cont
   const manualStopRef = useRef(false);
   const reconnectingRef = useRef(false);
   const reconnectTimerRef = useRef<number | null>(null);
+  const stableConnectionTimerRef = useRef<number | null>(null);
   const reconnectAttemptRef = useRef(0);
   const sessionHandleRef = useRef<string | null>(null);
   // Gemini ephemeral tokens are single-use for starting a new session, but the
@@ -137,6 +138,13 @@ export const GeminiLiveVoice: React.FC<GeminiLiveVoiceProps> = ({ language, cont
     }
   };
 
+  const clearStableConnectionTimer = () => {
+    if (stableConnectionTimerRef.current !== null) {
+      window.clearTimeout(stableConnectionTimerRef.current);
+      stableConnectionTimerRef.current = null;
+    }
+  };
+
   const disposeLocalAudio = () => {
     try { processorRef.current?.disconnect(); } catch {}
     try { sourceRef.current?.disconnect(); } catch {}
@@ -155,6 +163,7 @@ export const GeminiLiveVoice: React.FC<GeminiLiveVoiceProps> = ({ language, cont
   const closeSession = () => {
     manualStopRef.current = true;
     clearReconnectTimer();
+    clearStableConnectionTimer();
     try { sessionRef.current?.close?.(); } catch {}
     sessionRef.current = null;
     disposeLocalAudio();
@@ -229,6 +238,7 @@ export const GeminiLiveVoice: React.FC<GeminiLiveVoiceProps> = ({ language, cont
         },
         outputAudioTranscription: {},
         sessionResumption: resumeHandle ? { handle: resumeHandle } : {},
+        contextWindowCompression: { slidingWindow: {} },
         systemInstruction: systemInstructionRef.current,
       },
       callbacks: {
@@ -251,7 +261,10 @@ export const GeminiLiveVoice: React.FC<GeminiLiveVoiceProps> = ({ language, cont
               clearReconnectTimer();
               reconnectTimerRef.current = window.setTimeout(
                 () => {
-                  if (!manualStopRef.current) void reconnectLiveSession(sessionHandleRef.current);
+                  if (!manualStopRef.current) {
+                    reconnectAttemptRef.current += 1;
+                    void reconnectLiveSession(sessionHandleRef.current);
+                  }
                 },
                 Math.max(100, Math.floor(seconds * 1000) - 300),
               );
@@ -319,16 +332,29 @@ export const GeminiLiveVoice: React.FC<GeminiLiveVoiceProps> = ({ language, cont
           clearReconnectTimer();
 
           const attempt = reconnectAttemptRef.current;
-          const delay = Math.min(2500, 400 + attempt * 400);
+          if (attempt >= 8) {
+            clearReconnectTimer();
+            clearStableConnectionTimer();
+            if (mountedRef.current) {
+              setStatus('Voice connection failed');
+              setError('Gemini Live could not maintain a voice connection. Please tap Start Live Voice to try again.');
+              setActive(false);
+              setConnecting(false);
+            }
+            return;
+          }
           reconnectAttemptRef.current = attempt + 1;
+          const delay = Math.min(3000, 500 + attempt * 500);
 
           reconnectTimerRef.current = window.setTimeout(async () => {
             if (manualStopRef.current || !mountedRef.current) return;
 
             try {
               await reconnectLiveSession(sessionHandleRef.current);
-            } catch {
-              if (reconnectAttemptRef.current < 6 && mountedRef.current && !manualStopRef.current) {
+            } catch (reconnectError: any) {
+              if (reconnectAttemptRef.current < 8 && mountedRef.current && !manualStopRef.current) {
+                const detail = String(reconnectError?.message || 'Unknown reconnect error.');
+                setError('Voice reconnect failed: ' + detail);
                 setStatus('Retrying voice connection…');
                 reconnectTimerRef.current = window.setTimeout(() => {
                   if (!manualStopRef.current) void reconnectLiveSession(sessionHandleRef.current);
@@ -347,7 +373,14 @@ export const GeminiLiveVoice: React.FC<GeminiLiveVoiceProps> = ({ language, cont
 
     sessionRef.current = session;
     reconnectingRef.current = false;
-    reconnectAttemptRef.current = 0;
+    clearStableConnectionTimer();
+    // Do not reset the retry budget immediately. If a socket opens and then
+    // closes again, an immediate reset creates an endless reconnect loop.
+    // Reset only after the connection has remained healthy for 10 seconds.
+    stableConnectionTimerRef.current = window.setTimeout(() => {
+      stableConnectionTimerRef.current = null;
+      reconnectAttemptRef.current = 0;
+    }, 10000);
     setActive(true);
     setConnecting(false);
     setError('');
@@ -387,6 +420,7 @@ export const GeminiLiveVoice: React.FC<GeminiLiveVoiceProps> = ({ language, cont
     liveTokenRef.current = null;
     liveTokenExpiresAtRef.current = 0;
     reconnectAttemptRef.current = 0;
+    clearStableConnectionTimer();
     setError('');
     setInputTranscript('');
     setOutputTranscript('');
@@ -486,6 +520,7 @@ export const GeminiLiveVoice: React.FC<GeminiLiveVoiceProps> = ({ language, cont
   const stopVoice = () => {
     manualStopRef.current = true;
     clearReconnectTimer();
+    clearStableConnectionTimer();
 
     const session = sessionRef.current;
     if (!session) {
