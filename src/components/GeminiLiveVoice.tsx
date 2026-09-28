@@ -73,6 +73,50 @@ export const GeminiLiveVoice: React.FC<GeminiLiveVoiceProps> = ({ language, cont
   const sourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
   const mountedRef = useRef(true);
   const stopTimerRef = useRef<number | null>(null);
+  const nextPlayTimeRef = useRef(0);
+
+
+  const playPcm24k = (base64: string) => {
+    const audioContext = audioContextRef.current;
+    if (!audioContext || !base64) return;
+
+    try {
+      const binary = atob(base64);
+      const bytes = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+
+      const pcm = new Int16Array(
+        bytes.buffer,
+        bytes.byteOffset,
+        Math.floor(bytes.byteLength / 2),
+      );
+
+      if (!pcm.length) return;
+
+      const audioBuffer = audioContext.createBuffer(1, pcm.length, 24000);
+      const channel = audioBuffer.getChannelData(0);
+
+      for (let i = 0; i < pcm.length; i++) {
+        channel[i] = pcm[i] / 32768;
+      }
+
+      const source = audioContext.createBufferSource();
+      source.buffer = audioBuffer;
+      source.connect(audioContext.destination);
+
+      const startAt = Math.max(
+        audioContext.currentTime + 0.02,
+        nextPlayTimeRef.current,
+      );
+
+      source.start(startAt);
+      nextPlayTimeRef.current = startAt + audioBuffer.duration;
+    } catch (e) {
+      if (mountedRef.current) {
+        setError(e instanceof Error ? `AI audio playback failed: ${e.message}` : 'AI audio playback failed.');
+      }
+    }
+  };
 
   const disposeLocalAudio = () => {
     try { processorRef.current?.disconnect(); } catch {}
@@ -150,6 +194,13 @@ export const GeminiLiveVoice: React.FC<GeminiLiveVoiceProps> = ({ language, cont
         throw new Error(tokenPayload?.error || 'Could not obtain a secure Gemini Live session token.');
       }
 
+      // Create the browser audio context while it is still inside the
+      // user-initiated microphone gesture. This is required by iOS/Safari
+      // for reliable output-audio playback.
+      const audioContext = new AudioContext();
+      audioContextRef.current = audioContext;
+      await audioContext.resume();
+
       // Use Google's official GenAI SDK for the Live session instead of
       // manually parsing raw WebSocket frames. The SDK normalizes browser
       // WebSocket frames and exposes parsed serverContent callbacks.
@@ -218,6 +269,21 @@ export const GeminiLiveVoice: React.FC<GeminiLiveVoiceProps> = ({ language, cont
                 setOutputTranscript((prev) => prev + content.outputTranscription.text);
               }
 
+              // Gemini 3.8 Live returns native speech as 24 kHz PCM in
+              // modelTurn.parts[].inlineData. Transcription alone does not
+              // play the answer; the browser must explicitly schedule the
+              // returned PCM audio.
+              const parts = content.modelTurn?.parts || [];
+              for (const part of parts) {
+                if (part?.inlineData?.data) {
+                  playPcm24k(part.inlineData.data);
+                }
+              }
+
+              if (parts.length > 0 && mountedRef.current) {
+                setStatus('AI responding…');
+              }
+
               if (content.turnComplete && mountedRef.current) {
                 setStatus('Listening…');
               }
@@ -248,10 +314,6 @@ export const GeminiLiveVoice: React.FC<GeminiLiveVoiceProps> = ({ language, cont
       });
 
       sessionRef.current = session;
-
-      const audioContext = new AudioContext();
-      audioContextRef.current = audioContext;
-      await audioContext.resume();
 
       const source = audioContext.createMediaStreamSource(stream);
       const processor = audioContext.createScriptProcessor(2048, 1, 1);
