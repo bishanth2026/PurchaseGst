@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import { DocumentType, InvoiceStatus, ITCEligibility, Organization, PurchaseInvoice, UserRole } from '../types';
 import { exportInvoicesToCSV, exportInvoicesToExcel } from '../services/excelService';
+import { getInvoiceReturnPeriod, isInReturnPeriod } from '../utils/returnPeriod';
 
 interface PurchaseRegisterViewProps {
   invoices: PurchaseInvoice[];
@@ -43,6 +44,8 @@ export const PurchaseRegisterView: React.FC<PurchaseRegisterViewProps> = ({
   // Filtered list
   const filteredInvoices = useMemo(() => {
     return invoices.filter((inv) => {
+      if (!isInReturnPeriod(getInvoiceReturnPeriod(inv), organization.currentReturnPeriod)) return false;
+
       // Search term
       if (searchTerm) {
         const query = searchTerm.toLowerCase();
@@ -106,6 +109,9 @@ export const PurchaseRegisterView: React.FC<PurchaseRegisterViewProps> = ({
         <div>
           <h2 className="text-xl font-extrabold text-white flex items-center space-x-2">
             <span>Purchase Register</span>
+            <span className="text-xs px-2 py-0.5 rounded-full bg-indigo-500/10 text-indigo-300 border border-indigo-500/20 font-mono">
+              Period {organization.currentReturnPeriod}
+            </span>
             <span className="text-xs px-2 py-0.5 rounded-full bg-slate-800 text-slate-300 font-mono">
               {filteredInvoices.length} entries
             </span>
