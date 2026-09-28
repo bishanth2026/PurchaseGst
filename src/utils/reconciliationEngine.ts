@@ -1,3 +1,4 @@
+import { getGstr2bReturnPeriod, getInvoiceReturnPeriod, isInReturnPeriod } from './returnPeriod';
 import {
   DashboardMetrics,
   GSTR2BRecord,
@@ -65,6 +66,12 @@ export function runReconciliation(
   currentPeriod: string,
   existingReconciliations: ReconciliationItem[] = []
 ): ReconciliationItem[] {
+  // Hard scope both sides of reconciliation to the selected GST return period.
+  // Legacy purchase invoices without returnPeriod fall back to invoiceDate month.
+  booksInvoices = booksInvoices.filter((invoice) => isInReturnPeriod(getInvoiceReturnPeriod(invoice), currentPeriod));
+  gstr2bRecords = gstr2bRecords.filter((record) => isInReturnPeriod(getGstr2bReturnPeriod(record), currentPeriod));
+  existingReconciliations = existingReconciliations.filter((item) => isInReturnPeriod(item.returnPeriod, currentPeriod));
+
   const results: ReconciliationItem[] = [];
   const matched2BIds = new Set<string>();
   const matchedBookIds = new Set<string>();
