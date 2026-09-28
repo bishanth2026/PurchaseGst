@@ -17,6 +17,9 @@ import {
 import { Organization, PurchaseInvoice, UploadBatch } from '../types';
 import { extractInvoiceDataFromFile, OCRExtractionResult } from '../services/geminiOcrService';
 import { InvoiceService } from '../services/invoiceService';
+import { runInvoiceAgent } from '../agent/invoiceAgent';
+import { InvoiceAgentResult } from '../agent/agentTypes';
+import { validatePurchaseInvoice } from '../utils/gstValidation';
 
 interface BatchUploadViewProps {
   organization: Organization;
@@ -30,6 +33,7 @@ interface QueuedFile {
   status: 'PENDING' | 'EXTRACTING' | 'REVIEW_REQUIRED' | 'READY' | 'ERROR';
   extractedData?: Partial<PurchaseInvoice>;
   ocrResult?: OCRExtractionResult;
+  agentResult?: InvoiceAgentResult;
   error?: string;
 }
 
@@ -91,18 +95,26 @@ export const BatchUploadView: React.FC<BatchUploadViewProps> = ({
     );
 
     try {
-      const ocr = await extractInvoiceDataFromFile(item.file, organization.gstin, organization.id);
-      const hasUncertain = ocr.uncertainFields.length > 0;
+      const agent = await runInvoiceAgent(item.file, {
+        buyerGstin: organization.gstin,
+        orgId: organization.id,
+        existingInvoices: InvoiceService.getInvoices(),
+        existingReconciliations: InvoiceService.getReconciliationResults(),
+      });
+      const hasReview = agent.decision !== 'PROCESS';
 
       setQueue((prev) =>
         prev.map((q) =>
           q.id === fileId
             ? {
                 ...q,
-                status: hasUncertain ? 'REVIEW_REQUIRED' : 'READY',
-                extractedData: ocr.invoice,
-                ocrResult: ocr,
-                error: undefined,
+                status: agent.decision === 'OCR_RETRY' ? 'ERROR' : hasReview ? 'REVIEW_REQUIRED' : 'READY',
+                extractedData: agent.invoice,
+                ocrResult: agent.ocr
+                  ? { invoice: agent.invoice || {}, rawOutput: {}, confidenceScores: agent.ocr.confidenceScores, warnings: agent.ocr.warnings, uncertainFields: agent.ocr.uncertainFields }
+                  : undefined,
+                agentResult: agent,
+                error: agent.decision === 'OCR_RETRY' ? agent.nextAction : undefined,
               }
             : q
         )
@@ -136,17 +148,25 @@ export const BatchUploadView: React.FC<BatchUploadViewProps> = ({
       );
 
       try {
-        const ocr = await extractInvoiceDataFromFile(item.file, organization.gstin, organization.id);
-        const hasUncertain = ocr.uncertainFields.length > 0;
+        const agent = await runInvoiceAgent(item.file, {
+          buyerGstin: organization.gstin,
+          orgId: organization.id,
+          existingInvoices: InvoiceService.getInvoices(),
+          existingReconciliations: InvoiceService.getReconciliationResults(),
+        });
 
         setQueue((prev) =>
           prev.map((q) =>
             q.id === item.id
               ? {
                   ...q,
-                  status: hasUncertain ? 'REVIEW_REQUIRED' : 'READY',
-                  extractedData: ocr.invoice,
-                  ocrResult: ocr,
+                  status: agent.decision === 'OCR_RETRY' ? 'ERROR' : agent.decision === 'PROCESS' ? 'READY' : 'REVIEW_REQUIRED',
+                  extractedData: agent.invoice,
+                  ocrResult: agent.ocr
+                    ? { invoice: agent.invoice || {}, rawOutput: {}, confidenceScores: agent.ocr.confidenceScores, warnings: agent.ocr.warnings, uncertainFields: agent.ocr.uncertainFields }
+                    : undefined,
+                  agentResult: agent,
+                  error: agent.decision === 'OCR_RETRY' ? agent.nextAction : undefined,
                 }
               : q
           )
@@ -190,9 +210,30 @@ export const BatchUploadView: React.FC<BatchUploadViewProps> = ({
       (q) => (q.status === 'READY' || q.status === 'REVIEW_REQUIRED') && q.extractedData
     );
 
+    const rejectedAtCommit: string[] = [];
     readyItems.forEach((item) => {
+      const validation = validatePurchaseInvoice(
+        item.extractedData!,
+        organization.gstin,
+        InvoiceService.getInvoices()
+      );
+      if (!validation.isValid) {
+        rejectedAtCommit.push(item.file.name + ': ' + validation.errors.join(' '));
+        return;
+      }
       InvoiceService.addInvoice(item.extractedData!);
     });
+
+    if (rejectedAtCommit.length > 0) {
+      setQueue((prev) =>
+        prev.map((q) =>
+          rejectedAtCommit.some((msg) => msg.startsWith(q.file.name + ':'))
+            ? { ...q, status: 'REVIEW_REQUIRED', error: rejectedAtCommit.find((msg) => msg.startsWith(q.file.name + ':')) }
+            : q
+        )
+      );
+      return;
+    }
 
     setIsCommitted(true);
     setTimeout(() => {
@@ -407,6 +448,11 @@ export const BatchUploadView: React.FC<BatchUploadViewProps> = ({
                     {selectedFile.status === 'REVIEW_REQUIRED' && (
                       <span className="text-[11px] font-semibold text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/20">
                         Uncertain Fields Present
+                      </span>
+                    )}
+                    {selectedFile.agentResult && (
+                      <span className="text-[10px] font-semibold text-indigo-300 bg-indigo-500/10 px-2 py-0.5 rounded border border-indigo-500/20">
+                        Agent: {selectedFile.agentResult.decision.replaceAll('_', ' ')}
                       </span>
                     )}
                   </div>
