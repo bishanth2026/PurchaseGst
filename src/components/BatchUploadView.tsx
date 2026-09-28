@@ -204,10 +204,41 @@ export const BatchUploadView: React.FC<BatchUploadViewProps> = ({
     );
   };
 
-  // Commit all ready and reviewed items to Purchase Register
+  // Open a review-required invoice and explicitly approve it after human verification.
+  const approveReviewedItem = (fileId: string) => {
+    const item = queue.find((q) => q.id === fileId);
+    if (!item || !item.extractedData) return;
+
+    const validation = validatePurchaseInvoice(
+      item.extractedData,
+      organization.gstin,
+      InvoiceService.getInvoices()
+    );
+
+    if (!validation.isValid) {
+      setQueue((prev) =>
+        prev.map((q) =>
+          q.id === fileId
+            ? { ...q, status: 'REVIEW_REQUIRED', error: validation.errors.join(' ') }
+            : q
+        )
+      );
+      return;
+    }
+
+    setQueue((prev) =>
+      prev.map((q) =>
+        q.id === fileId
+          ? { ...q, status: 'READY', error: undefined }
+          : q
+      )
+    );
+  };
+
+  // Commit only explicitly verified/approved items.
   const commitAllApproved = () => {
     const readyItems = queue.filter(
-      (q) => (q.status === 'READY' || q.status === 'REVIEW_REQUIRED') && q.extractedData
+      (q) => q.status === 'READY' && q.extractedData
     );
 
     const rejectedAtCommit: string[] = [];
@@ -393,9 +424,17 @@ export const BatchUploadView: React.FC<BatchUploadViewProps> = ({
                         </span>
                       )}
                       {item.status === 'REVIEW_REQUIRED' && (
-                        <span className="text-[10px] px-2 py-0.5 rounded bg-amber-950 text-amber-400 border border-amber-800 font-semibold">
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setSelectedFileId(item.id);
+                          }}
+                          className="text-[10px] px-2 py-0.5 rounded bg-amber-950 text-amber-400 border border-amber-800 font-semibold hover:bg-amber-900 hover:border-amber-500 transition"
+                          title="Open invoice for manual review"
+                        >
                           Review
-                        </span>
+                        </button>
                       )}
                       {item.status === 'ERROR' && (
                         <span className="text-[10px] px-2 py-0.5 rounded bg-rose-950 text-rose-400 border border-rose-800">
@@ -633,6 +672,25 @@ export const BatchUploadView: React.FC<BatchUploadViewProps> = ({
                             </div>
                           </div>
                         </div>
+
+                        {selectedFile.status === 'REVIEW_REQUIRED' && (
+                          <div className="mt-4 pt-4 border-t border-slate-700">
+                            <div className="text-[11px] text-amber-300 mb-2">
+                              Agent requires human review before this invoice can enter the Purchase Register.
+                            </div>
+                            {selectedFile.error && (
+                              <div className="text-[11px] text-rose-300 mb-3">{selectedFile.error}</div>
+                            )}
+                            <button
+                              type="button"
+                              onClick={() => approveReviewedItem(selectedFile.id)}
+                              className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold transition"
+                            >
+                              <CheckCircle2 className="w-4 h-4" />
+                              Approve After Review
+                            </button>
+                          </div>
+                        )}
                       </>
                     ) : selectedFile.status === 'ERROR' ? (
                       <div className="p-6 bg-slate-900/90 rounded-xl border border-rose-800/60 space-y-4">
